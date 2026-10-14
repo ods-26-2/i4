@@ -12,7 +12,7 @@ extern "C" {
 }
 
 static constexpr AVCodecID VIDEO_CODEC_ID = AV_CODEC_ID_H264;
-static constexpr int DETECTAR_A_CADA_N_FRAMES = 5;
+static constexpr int DETECTAR_A_CADA_N_FRAMES = 3;
 static const char* PASTA_CAPTURAS = "capturas";
 
 static const char* SSD_PROTOTXT = "MobileNetSSD_deploy.prototxt";
@@ -172,6 +172,8 @@ static void detectar_e_salvar(DecoderState& st, const AVFrame* frame) {
     int dst_linesize[1] = { static_cast<int>(st.bgr.step) };
     sws_scale(st.sws_bgr, frame->data, frame->linesize, 0, h, dst, dst_linesize);
 
+    cv::Mat anotado = st.bgr.clone();
+
     // Etapa 1: pessoas
     cv::Mat blob = cv::dnn::blobFromImage(
         st.bgr, 0.007843, cv::Size(SSD_ENTRADA, SSD_ENTRADA),
@@ -201,9 +203,11 @@ static void detectar_e_salvar(DecoderState& st, const AVFrame* frame) {
         if (rostos.empty()) continue;
 
         achou = true;
-        cv::rectangle(st.bgr, pessoa, cv::Scalar(0, 255, 0), 2);
+        // cv::rectangle(st.bgr, pessoa, cv::Scalar(0, 255, 0), 2);
+        cv::rectangle(anotado, pessoa, cv::Scalar(0, 255, 0), 2);
         for (const cv::Rect& r : rostos) {
-            cv::rectangle(st.bgr, r + topo.tl(), cv::Scalar(255, 0, 0), 2);
+            // cv::rectangle(st.bgr, r + topo.tl(), cv::Scalar(255, 0, 0), 2);
+            cv::rectangle(anotado, r + topo.tl(), cv::Scalar(255, 0, 0), 2);
         }
     }
 
@@ -218,12 +222,12 @@ static void detectar_e_salvar(DecoderState& st, const AVFrame* frame) {
     auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
 
     st.shm->escrever(st.bgr, ms); // escrita em memoria
-       
+    
     std::string caminho = std::string(PASTA_CAPTURAS) + "/pessoa_" +
-        std::to_string(ms) + "_f" + std::to_string(st.frames_recebidos) + ".jpg";
-
-
-    if (cv::imwrite(caminho, st.bgr)) {
+    std::to_string(ms) + "_f" + std::to_string(st.frames_recebidos) + ".jpg";
+    
+    
+    if (cv::imwrite(caminho, anotado)) {
         CROW_LOG_INFO << "Pessoa com rosto detectada, foto salva: " << caminho;
     } else {
         CROW_LOG_ERROR << "Falha ao salvar " << caminho;
