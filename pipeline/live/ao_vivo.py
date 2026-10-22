@@ -8,6 +8,12 @@ from pipeline.feature_extraction.landmark_extractor import extract_landmarks
 from pipeline.model.predict import SignPredictor
 from pipeline.schema.sign_annotation import SignAnnotation
 
+
+from ods_bus.client import BusProducer
+from pipeline.bus_publisher import I4BusPublisher
+from pipeline.feature_extraction.landmark_extractor import sequence_to_keypoint_frames
+
+
 SHM = "/dev/shm/frames_cam"
 TARGET_FPS = 25.0        # o mesmo do PreprocessConfig (o treino usou isso)
 SIZE = (224, 224)        # idem, resize esticado como no video_preprocessor
@@ -55,7 +61,8 @@ def main():
     inode = os.fstat(reader.f.fileno()).st_ino
     buf, last = [], time.time()
     print("Aguardando frames...", flush=True)
-
+    
+    bus = I4BusPublisher(BusProducer(), source_id="cam0")  
     while True:
         # o servidor recria o arquivo quando o cliente reconecta
         try:
@@ -81,6 +88,12 @@ def main():
                 frames, dur_ms = preparar(buf)
                 seq = extract_landmarks(frames)
                 label, conf = predictor.predict(seq)
+
+                ts = np.linspace(buf[0][1], buf[-1][1], len(seq)).astype(int).tolist()
+                bus.publish_sign(label=label, confidence=conf,
+                                 keypoint_frames=sequence_to_keypoint_frames(seq),
+                                 timestamps_ms=ts, image_size=(reader.w, reader.h))
+                
                 print(SignAnnotation(
                     sinal=label, confianca=conf,
                     inicio_ms=int(buf[0][1]), fim_ms=int(buf[-1][1]),

@@ -129,7 +129,11 @@ def load_checkpoint_meta(path: str | Path, map_location: str = "cpu") -> dict:
 
 def load_checkpoint(path: str | Path, map_location: str = "cpu") -> tuple[SignLSTMClassifier, list[str]]:
     checkpoint = torch.load(path, map_location=map_location, weights_only=False)
-    config = ClassifierConfig(**checkpoint["config"])
+    saved = dict(checkpoint["config"])
+    # checkpoints anteriores a essas features não gravavam os campos
+    saved.setdefault("input_layer_norm", False)
+    saved.setdefault("attention_pooling", False)
+    config = ClassifierConfig(**saved)
     model = SignLSTMClassifier(config)
     model.load_state_dict(checkpoint["state_dict"])
     model.eval()
