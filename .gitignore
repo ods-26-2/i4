@@ -1,0 +1,20 @@
+/Crow
+__pycache__/
+*.pyc
+.pytest_cache/
+.claude/
+
+# dataset bruto/processado - grande demais para o git (9GB+, contém
+# arquivos de video acima do limite de 100MB do GitHub)
+dataset/
+
+# modelo do MediaPipe baixado automaticamente por landmark_extractor.py
+# na primeira execucao (nao faz parte do codigo do projeto)
+pipeline/feature_extraction/models/
+
+# cache local do huggingface_hub (download do dataset) - cresce de novo
+# a cada rodada do script de ingestão, não é artefato do projeto
+.hf_cache/
+download_log.txt
+feature_extraction_log.txt
+train_log.txt
