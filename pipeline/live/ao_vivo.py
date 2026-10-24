@@ -90,9 +90,11 @@ def main():
                 label, conf = predictor.predict(seq)
 
                 ts = np.linspace(buf[0][1], buf[-1][1], len(seq)).astype(int).tolist()
-                bus.publish_sign(label=label, confidence=conf,
-                                 keypoint_frames=sequence_to_keypoint_frames(seq),
-                                 timestamps_ms=ts, image_size=(reader.w, reader.h))
+                
+                # DESCOMENTE A LINHA PARA PUBLICAR NO BARRAMENTO
+                # bus.publish_sign(label=label, confidence=conf,
+                                #  keypoint_frames=sequence_to_keypoint_frames(seq),
+                                #  timestamps_ms=ts, image_size=(reader.w, reader.h))
                 
                 print(SignAnnotation(
                     sinal=label, confianca=conf,
