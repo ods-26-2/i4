@@ -5,6 +5,7 @@ I4 -> barramento. Publica, para cada sinal reconhecido:
 
     ods.i4.keypoints   um evento POR QUADRO (convenção 5 da spec)
     ods.i4.sign        um evento por sinal fechado
+    ods.i4.facial_marker  um evento por marcador facial gramatical reconhecido
 
 Consumidores (arquitetura 6c): S6 e A6. Perfil EV-SINAL.
 
@@ -27,8 +28,11 @@ from typing import Callable, Optional, Sequence
 from ods_bus.client import BusProducer
 from ods_bus.envelope import SequenceCounter, build_message, epoch_ms_to_iso
 from ods_bus.keypoints import to_spec_frame
+from pipeline.schema.facial_marker import NEUTRAL_MARKER, FacialMarker
 
 PRODUCER = "I4"
+# Versão do artefato do classificador de expressões. Provisória até B5 versionar o modelo.
+FACIAL_MARKER_ARTIFACT_VERSION = "facial-markers-0.1"
 
 
 class I4BusPublisher:
@@ -51,7 +55,7 @@ class I4BusPublisher:
         self._seq = SequenceCounter()
         self._frame_index = 0
 
-    def _msg(self, schema: str, payload: dict, captured_at: str):
+    def _msg(self, schema: str, payload: dict, captured_at: str, artifact_version: Optional[str] = None):
         return build_message(
             message_type="event",
             schema=schema,
@@ -62,7 +66,7 @@ class I4BusPublisher:
             source_id=self.source_id,
             session_id=self.session_id,
             sequence=self._seq.next(PRODUCER, self.session_id),
-            artifact_version=self.artifact_version,
+            artifact_version=artifact_version or self.artifact_version,
         )
 
     def publish_sign(
@@ -104,3 +108,34 @@ class I4BusPublisher:
         # No evento de sinal, captured_at = start_at (spec).
         self.producer.publish(self._msg("ods.i4.sign", sign_payload, start_at))
         self.producer.flush(5.0)
+
+    def publish_facial_marker(
+        self,
+        marker: FacialMarker,
+        *,
+        allowed_markers=None,
+        artifact_version: str = FACIAL_MARKER_ARTIFACT_VERSION,
+        publish_neutral: bool = False,
+        flush: bool = True,
+    ) -> bool:
+        """Publica um `ods.i4.facial_marker`. Devolve False se não publicou
+        (NEUTRO = "sem marcador", só vai se `publish_neutral`).
+
+        `allowed_markers` = lista `markers` do LEXICON de A6; um marcador
+        fora dela é erro do nosso lado (melhor falhar aqui, como manda B1).
+        `start_ms`/`end_ms` em epoch ms absoluto, a mesma base dos
+        timestamps de `publish_sign`, pra A6 e S6 alinharem com o sinal."""
+        marker.validate(allowed_markers)
+        if marker.marker == NEUTRAL_MARKER and not publish_neutral:
+            return False
+        start_at, end_at = epoch_ms_to_iso(marker.start_ms), epoch_ms_to_iso(marker.end_ms)
+        payload = {
+            "marker": marker.marker,
+            "confidence": round(float(marker.confidence), 4),
+            "start_at": start_at,
+            "end_at": end_at,
+        }
+        self.producer.publish(self._msg("ods.i4.facial_marker", payload, start_at, artifact_version))
+        if flush:
+            self.producer.flush(5.0)
+        return True
