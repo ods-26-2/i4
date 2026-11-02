@@ -75,7 +75,7 @@ def main():
     
     bus = I4BusPublisher(BusProducer(), source_id="cam0")
     
-    expr = ExpressionPredictor(args.expr_model, device=args.device) if args.expr_model else None
+    # expr = ExpressionPredictor(args.expr_model, device=args.device) if args.expr_model else None
     rolling = RollingBaseline(seconds=10.0, fps=25.0)
     while True:
         # o servidor recria o arquivo quando o cliente reconecta
@@ -110,15 +110,15 @@ def main():
                                  keypoint_frames=sequence_to_keypoint_frames(seq),
                                  timestamps_ms=ts, image_size=(reader.w, reader.h))
                 
-                if expr:
-                    baseline = rolling.value
-                    if np.any(baseline):  # buffer já aquecido; senão só alimenta a baseline
-                        for seg in expr.predict_segments(seq, ts, baseline=baseline):
-                            bus.publish_facial_marker(
-                                FacialMarker(seg.marker, seg.confidence, seg.start_ms, seg.end_ms)
-                            )
-                    for b in base_features(seq):
-                        rolling.update(b)
+                # if expr:
+                #     baseline = rolling.value
+                #     if np.any(baseline):  # buffer já aquecido; senão só alimenta a baseline
+                #         for seg in expr.predict_segments(seq, ts, baseline=baseline):
+                #             bus.publish_facial_marker(
+                #                 FacialMarker(seg.marker, seg.confidence, seg.start_ms, seg.end_ms)
+                #             )
+                #     for b in base_features(seq):
+                #         rolling.update(b)
                 
                 print(SignAnnotation(
                     sinal=label, confianca=conf,

@@ -49,6 +49,23 @@ def _consumer(offset: str):
     )
 
 
+def _resumo(msg: dict) -> str:
+    p = msg.get("payload", {})
+    schema = msg.get("schema", "")
+    if schema == "ods.s6.synthesis.command":
+        return f"glosses={p.get('glosses')} speed={p.get('speed_factor')} markers={p.get('markers')}"
+    if schema == "ods.s6.synthesis.reply":
+        return (f"status={p.get('status')} segments="
+                f"{[s['sign'] for s in p.get('segments', []) if not s['is_transition']]} "
+                f"unknown={p.get('unknown_signs')} ref={p.get('trajectory_ref')}")
+    if schema == "ods.i4.sign":
+        return f"sign={p.get('sign')} conf={p.get('confidence')}"
+    if schema == "ods.i4.facial_marker":
+        return f"marker={p.get('marker')} conf={p.get('confidence')}"
+    if schema == "ods.i4.keypoints":
+        return f"frame_index={p.get('frame_index')}"  # payload grande, não imprime tudo
+    return str(list(p))[:120]
+
 def tail(args) -> None:
     consumer = _consumer("earliest" if args.from_start else "latest")
     consumer.subscribe([topic_for(s) for s in args.schemas])
@@ -71,6 +88,7 @@ def tail(args) -> None:
                 continue
             ok, why = validate_message(msg)
             problems = [] if ok else [why]
+            
             if ok:
                 if msg["schema"] != m.topic() and topic_for(msg["schema"]) != m.topic():
                     problems.append(f"schema {msg['schema']} em tópico {m.topic()}")
@@ -92,8 +110,7 @@ def tail(args) -> None:
             status = "OK " if not problems else "ERRO"
             print(
                 f"[{seen}] {status} {msg.get('schema')} prod={msg.get('producer')} "
-                f"seq={msg.get('sequence')} cap={msg.get('captured_at')} "
-                f"payload={list(msg.get('payload', {}))[:6]}"
+                f"seq={msg.get('sequence')} | {_resumo(msg)}"
             )
             for p in problems:
                 print(f"        ! {p}")
