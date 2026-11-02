@@ -12,7 +12,7 @@ extern "C" {
 }
 
 static constexpr AVCodecID VIDEO_CODEC_ID = AV_CODEC_ID_H264;
-static constexpr int DETECTAR_A_CADA_N_FRAMES = 3;
+static constexpr int DETECTAR_A_CADA_N_FRAMES = 1;
 static const char* PASTA_CAPTURAS = "capturas";
 
 static const char* SSD_PROTOTXT = "MobileNetSSD_deploy.prototxt";
@@ -153,36 +153,208 @@ static std::unique_ptr<DecoderState> criar_decoder() {
     return st;
 }
 
+
 // ---------------------------------------------------------------------
 // Detecção: pessoa (SSD) -> rosto (Haar) dentro da caixa da pessoa
 // ---------------------------------------------------------------------
 
-static void detectar_e_salvar(DecoderState& st, const AVFrame* frame) {
-    const int w = frame->width, h = frame->height;
+// static void detectar_e_salvar(DecoderState& st, const AVFrame* frame) {
+//     const int w = frame->width, h = frame->height;
+//     const cv::Rect limites(0, 0, w, h);
+
+//     // AVFrame (YUV) -> cv::Mat BGR
+//     st.sws_bgr = sws_getCachedContext(
+//         st.sws_bgr, w, h, (AVPixelFormat)frame->format,
+//         w, h, AV_PIX_FMT_BGR24, SWS_BILINEAR, nullptr, nullptr, nullptr);
+//     if (!st.sws_bgr) return;
+
+//     st.bgr.create(h, w, CV_8UC3);
+//     uint8_t* dst[1] = { st.bgr.data };
+//     int dst_linesize[1] = { static_cast<int>(st.bgr.step) };
+//     sws_scale(st.sws_bgr, frame->data, frame->linesize, 0, h, dst, dst_linesize);
+    
+//     cv::imwrite("teste_decodificado.jpg", st.bgr);
+
+//     cv::Mat anotado = st.bgr.clone();
+
+//     // Etapa 1: pessoas
+//     cv::Mat blob = cv::dnn::blobFromImage(
+//         st.bgr, 0.007843, cv::Size(SSD_ENTRADA, SSD_ENTRADA),
+//         cv::Scalar(127.5, 127.5, 127.5), false, false);
+//     st.ssd.setInput(blob);
+//     cv::Mat saida = st.ssd.forward();             // [1, 1, N, 7]
+//     cv::Mat det(saida.size[2], saida.size[3], CV_32F, saida.ptr<float>());
+
+//     bool achou = false;
+//     for (int i = 0; i < det.rows; ++i) {
+//         const float* d = det.ptr<float>(i);       // _, classe, conf, x1, y1, x2, y2 (normalizados)
+//         if (static_cast<int>(d[1]) != SSD_CLASSE_PESSOA || d[2] < PESSOA_CONF_MIN) continue;
+
+//         cv::Rect pessoa(static_cast<int>(d[3] * w), static_cast<int>(d[4] * h),
+//                         static_cast<int>((d[5] - d[3]) * w), static_cast<int>((d[6] - d[4]) * h));
+//         pessoa &= limites;
+//         if (pessoa.area() <= 0) continue;
+
+//         // Etapa 2: rosto, só na parte de cima do recorte da pessoa
+//         cv::Rect topo(pessoa.x, pessoa.y, pessoa.width, static_cast<int>(pessoa.height * 0.6));
+//         cv::Mat cinza;
+//         cv::cvtColor(st.bgr(topo), cinza, cv::COLOR_BGR2GRAY);
+//         cv::equalizeHist(cinza, cinza);
+
+//         std::vector<cv::Rect> rostos;
+//         st.rosto.detectMultiScale(cinza, rostos, 1.1, 5, 0, cv::Size(30, 30));
+//         if (rostos.empty()) continue;
+
+//         achou = true;
+//         // cv::rectangle(st.bgr, pessoa, cv::Scalar(0, 255, 0), 2);
+//         cv::rectangle(anotado, pessoa, cv::Scalar(0, 255, 0), 2);
+//         for (const cv::Rect& r : rostos) {
+//             // cv::rectangle(st.bgr, r + topo.tl(), cv::Scalar(255, 0, 0), 2);
+//             cv::rectangle(anotado, r + topo.tl(), cv::Scalar(255, 0, 0), 2);
+//         }
+//     }
+
+//     // if (!achou) return; // reconhecimento de rosto
+
+//     if (!st.shm || st.shm->w() != w || st.shm->h() != h) {
+//         st.shm.reset();  // libera o antigo antes de recriar com o mesmo nome
+//         st.shm = std::make_unique<FrameShm>("/frames_cam", w, h);
+//         if (!st.shm->ok()) { CROW_LOG_ERROR << "Falha ao criar shm"; st.shm.reset(); return; }
+//     }
+
+//     auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+
+//     st.shm->escrever(st.bgr, ms); // escrita em memoria
+    
+//     std::string caminho = std::string(PASTA_CAPTURAS) + "/pessoa_" +
+//     std::to_string(ms) + "_f" + std::to_string(st.frames_recebidos) + ".jpg";
+    
+    
+//     // if (cv::imwrite(caminho, anotado)) {
+//     //     CROW_LOG_INFO << "Pessoa com rosto detectada, foto salva: " << caminho;
+//     // } else {
+//     //     CROW_LOG_ERROR << "Falha ao salvar " << caminho;
+//     // }
+//     if (cv::imwrite(caminho, anotado)) {
+//         CROW_LOG_INFO << "Frame salvo: " << caminho;
+//     } else {
+//         CROW_LOG_ERROR << "Falha ao salvar " << caminho;
+//     }
+    
+// }
+
+// ---------------------------------------------------------------------
+// Consumo do vídeo
+// ---------------------------------------------------------------------
+// Uma mensagem pode conter várias frames concatenadas (ou uma frame partida
+// em duas mensagens), então o parser acha os limites de cada access unit
+// antes de mandar packet por packet ao decoder.
+
+// static void consumir_video(DecoderState& st, const std::string& data) {
+//     if (data.empty()) return;
+
+//     int buf_size = static_cast<int>(data.size());
+
+//     uint8_t* buffer = static_cast<uint8_t*>(
+//         av_mallocz(buf_size + AV_INPUT_BUFFER_PADDING_SIZE)
+//     );
+
+//     if (!buffer) {
+//         CROW_LOG_ERROR << "Falha ao alocar buffer";
+//         return;
+//     }
+
+//     memcpy(buffer, data.data(), buf_size);
+
+//     uint8_t* buf = buffer;
+
+//     while (buf_size > 0) {
+//         uint8_t* parsed_data = nullptr;
+//         int parsed_size = 0;
+
+//         int consumido = av_parser_parse2(
+//             st.parser, st.codec_ctx,
+//             &parsed_data, &parsed_size,
+//             buf, buf_size,
+//             AV_NOPTS_VALUE, AV_NOPTS_VALUE, 0);
+
+
+//             // CROW_LOG_INFO << "Parser: entrada=" << buf_size
+//             //   << ", consumido=" << consumido
+//             //   << ", parsed_size=" << parsed_size;
+
+//         buf += consumido;
+//         buf_size -= consumido;
+
+//         if (parsed_size > 0) {
+//             st.pkt->data = parsed_data;
+//             st.pkt->size = parsed_size;
+
+//             // CROW_LOG_INFO << "Enviando packet ao decoder: "
+//             //   << parsed_size << " bytes";
+
+//             int ret = avcodec_send_packet(st.codec_ctx, st.pkt);
+//             if (ret < 0) {
+//                 char errbuf[AV_ERROR_MAX_STRING_SIZE];
+//                 av_strerror(ret, errbuf, sizeof(errbuf));
+//                 CROW_LOG_WARNING << "Falha ao enviar packet ao decoder: " << errbuf;
+//             } else {
+//                 // while (avcodec_receive_frame(st.codec_ctx, st.frame) == 0) {
+//                 //     st.frames_recebidos++;
+//                 //     if (st.frames_recebidos % DETECTAR_A_CADA_N_FRAMES == 0) {
+//                 //         detectar_e_salvar(st, st.frame);
+//                 //     }
+//                 // }
+//                 while (true) {
+//                     int ret = avcodec_receive_frame(st.codec_ctx, st.frame);
+
+//                     if (ret == 0) {
+//                         st.frames_recebidos++;
+
+//                         CROW_LOG_INFO << "Frame decodificado: "
+//                                       << st.frames_recebidos;
+
+//                         if (st.frames_recebidos % DETECTAR_A_CADA_N_FRAMES == 0) {
+//                             detectar_e_salvar(st, st.frame);
+//                         }
+
+//                         av_frame_unref(st.frame);
+//                     }
+//                     else if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF) {
+//                         break;
+//                     }
+//                     else {
+//                         char errbuf[AV_ERROR_MAX_STRING_SIZE];
+//                         av_strerror(ret, errbuf, sizeof(errbuf));
+
+//                         CROW_LOG_ERROR << "Erro ao decodificar frame: " << errbuf;
+//                         break;
+//                     }
+//                 }
+//             }
+//         }
+
+//         if (consumido == 0) break; // evita loop infinito se o parser não avançar
+//     }
+//     av_free(buffer);
+// }
+
+
+
+static void detectar_e_salvar_direto(DecoderState& st, const cv::Mat& bgr) {
+    const int w = bgr.cols, h = bgr.rows;
     const cv::Rect limites(0, 0, w, h);
+    cv::Mat anotado = bgr.clone();
+    bool achou = false;
 
-    // AVFrame (YUV) -> cv::Mat BGR
-    st.sws_bgr = sws_getCachedContext(
-        st.sws_bgr, w, h, (AVPixelFormat)frame->format,
-        w, h, AV_PIX_FMT_BGR24, SWS_BILINEAR, nullptr, nullptr, nullptr);
-    if (!st.sws_bgr) return;
-
-    st.bgr.create(h, w, CV_8UC3);
-    uint8_t* dst[1] = { st.bgr.data };
-    int dst_linesize[1] = { static_cast<int>(st.bgr.step) };
-    sws_scale(st.sws_bgr, frame->data, frame->linesize, 0, h, dst, dst_linesize);
-
-    cv::Mat anotado = st.bgr.clone();
-
-    // Etapa 1: pessoas
+    // Etapa 1: Pessoas (MobileNet-SSD)
     cv::Mat blob = cv::dnn::blobFromImage(
-        st.bgr, 0.007843, cv::Size(SSD_ENTRADA, SSD_ENTRADA),
+        bgr, 0.007843, cv::Size(SSD_ENTRADA, SSD_ENTRADA),
         cv::Scalar(127.5, 127.5, 127.5), false, false);
     st.ssd.setInput(blob);
     cv::Mat saida = st.ssd.forward();             // [1, 1, N, 7]
     cv::Mat det(saida.size[2], saida.size[3], CV_32F, saida.ptr<float>());
 
-    bool achou = false;
     for (int i = 0; i < det.rows; ++i) {
         const float* d = det.ptr<float>(i);       // _, classe, conf, x1, y1, x2, y2 (normalizados)
         if (static_cast<int>(d[1]) != SSD_CLASSE_PESSOA || d[2] < PESSOA_CONF_MIN) continue;
@@ -192,10 +364,10 @@ static void detectar_e_salvar(DecoderState& st, const AVFrame* frame) {
         pessoa &= limites;
         if (pessoa.area() <= 0) continue;
 
-        // Etapa 2: rosto, só na parte de cima do recorte da pessoa
+        // Etapa 2: Rosto (Haar Cascade), só na parte de cima do recorte da pessoa
         cv::Rect topo(pessoa.x, pessoa.y, pessoa.width, static_cast<int>(pessoa.height * 0.6));
         cv::Mat cinza;
-        cv::cvtColor(st.bgr(topo), cinza, cv::COLOR_BGR2GRAY);
+        cv::cvtColor(bgr(topo), cinza, cv::COLOR_BGR2GRAY);
         cv::equalizeHist(cinza, cinza);
 
         std::vector<cv::Rect> rostos;
@@ -203,85 +375,68 @@ static void detectar_e_salvar(DecoderState& st, const AVFrame* frame) {
         if (rostos.empty()) continue;
 
         achou = true;
-        // cv::rectangle(st.bgr, pessoa, cv::Scalar(0, 255, 0), 2);
         cv::rectangle(anotado, pessoa, cv::Scalar(0, 255, 0), 2);
         for (const cv::Rect& r : rostos) {
-            // cv::rectangle(st.bgr, r + topo.tl(), cv::Scalar(255, 0, 0), 2);
             cv::rectangle(anotado, r + topo.tl(), cv::Scalar(255, 0, 0), 2);
         }
     }
 
+    // Sem pessoa com rosto: não escreve na shm e não salva nada. É essa
+    // ausência de frame novo que o ao_vivo.py usa para fechar um sinal.
     if (!achou) return;
 
+    // Cria (ou recria, se a resolução mudou) a região de memória compartilhada.
     if (!st.shm || st.shm->w() != w || st.shm->h() != h) {
         st.shm.reset();  // libera o antigo antes de recriar com o mesmo nome
         st.shm = std::make_unique<FrameShm>("/frames_cam", w, h);
-        if (!st.shm->ok()) { CROW_LOG_ERROR << "Falha ao criar shm"; st.shm.reset(); return; }
+        if (!st.shm->ok()) {
+            CROW_LOG_ERROR << "Falha ao criar shm";
+            st.shm.reset();
+            return;
+        }
     }
 
-    auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+    auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::system_clock::now().time_since_epoch()).count();
 
-    st.shm->escrever(st.bgr, ms); // escrita em memoria
-    
+    // O frame SEM anotação vai pra shm (o MediaPipe não pode ver os retângulos).
+    st.shm->escrever(bgr, ms);
+
+    // O frame anotado vai pro disco, só para conferência.
     std::string caminho = std::string(PASTA_CAPTURAS) + "/pessoa_" +
-    std::to_string(ms) + "_f" + std::to_string(st.frames_recebidos) + ".jpg";
-    
-    
+                          std::to_string(ms) + "_f" + std::to_string(st.frames_recebidos) + ".jpg";
     if (cv::imwrite(caminho, anotado)) {
         CROW_LOG_INFO << "Pessoa com rosto detectada, foto salva: " << caminho;
     } else {
         CROW_LOG_ERROR << "Falha ao salvar " << caminho;
     }
-    
-    
 }
 
-// ---------------------------------------------------------------------
-// Consumo do vídeo
-// ---------------------------------------------------------------------
-// Uma mensagem pode conter várias frames concatenadas (ou uma frame partida
-// em duas mensagens), então o parser acha os limites de cada access unit
-// antes de mandar packet por packet ao decoder.
+// Função simplificada para processar o frame JPEG recebido
+static void consumir_video_jpeg(DecoderState& st, const std::string& data) {
+    if (data.empty()) return;
 
-static void consumir_video(DecoderState& st, const std::string& data) {
-    const uint8_t* buf = reinterpret_cast<const uint8_t*>(data.data());
-    int buf_size = static_cast<int>(data.size());
+    // Converte os dados do WebSocket num vector para o OpenCV decodificar
+    std::vector<uchar> buffer(data.begin(), data.end());
+    st.bgr = cv::imdecode(buffer, cv::IMREAD_COLOR); // <-- Alterado de cv2 para cv
 
-    while (buf_size > 0) {
-        uint8_t* parsed_data = nullptr;
-        int parsed_size = 0;
+    if (st.bgr.empty()) {
+        CROW_LOG_ERROR << "Falha ao descodificar JPEG recebido";
+        return;
+    }
 
-        int consumido = av_parser_parse2(
-            st.parser, st.codec_ctx,
-            &parsed_data, &parsed_size,
-            buf, buf_size,
-            AV_NOPTS_VALUE, AV_NOPTS_VALUE, 0);
+    st.frames_recebidos++;
+    const int w = st.bgr.cols;
+    const int h = st.bgr.rows;
 
-        buf += consumido;
-        buf_size -= consumido;
+    CROW_LOG_INFO << "Frame JPEG descodificado: " << st.frames_recebidos << " (" << w << "x" << h << ")";
 
-        if (parsed_size > 0) {
-            st.pkt->data = parsed_data;
-            st.pkt->size = parsed_size;
-
-            int ret = avcodec_send_packet(st.codec_ctx, st.pkt);
-            if (ret < 0) {
-                char errbuf[AV_ERROR_MAX_STRING_SIZE];
-                av_strerror(ret, errbuf, sizeof(errbuf));
-                CROW_LOG_WARNING << "Falha ao enviar packet ao decoder: " << errbuf;
-            } else {
-                while (avcodec_receive_frame(st.codec_ctx, st.frame) == 0) {
-                    st.frames_recebidos++;
-                    if (st.frames_recebidos % DETECTAR_A_CADA_N_FRAMES == 0) {
-                        detectar_e_salvar(st, st.frame);
-                    }
-                }
-            }
-        }
-
-        if (consumido == 0) break; // evita loop infinito se o parser não avançar
+    // Executa detecção a cada N frames
+    if (st.frames_recebidos % DETECTAR_A_CADA_N_FRAMES == 0) {
+        detectar_e_salvar_direto(st, st.bgr);
     }
 }
+
 
 // ---------------------------------------------------------------------
 // App
@@ -289,7 +444,8 @@ static void consumir_video(DecoderState& st, const std::string& data) {
 
 int main() {
     std::filesystem::create_directories(PASTA_CAPTURAS);
-
+    static uint64_t mensagens_recebidas = 0;
+    
     crow::SimpleApp app;
 
     CROW_WEBSOCKET_ROUTE(app, "/ws/video")
@@ -318,8 +474,23 @@ int main() {
         })
         .onmessage([](crow::websocket::connection& conn, const std::string& data, bool is_binary) {
             if (!is_binary || &conn != g_conn) return;
-            consumir_video(*g_decoder, data);
+            consumir_video_jpeg(*g_decoder, data);
         });
+
+
+
+        // .onmessage([](crow::websocket::connection& conn,
+        //     const std::string& data, bool is_binary) {
+        //         if (&conn != g_conn || !is_binary) return;
+                
+        //         mensagens_recebidas++;
+                
+        //         CROW_LOG_INFO << "Mensagem #" << mensagens_recebidas
+        //         << ": " << data.size() << " bytes";
+                
+        //         consumir_video(*g_decoder, data);
+        // });
+        
 
     app.port(18080).run();
     return 0;

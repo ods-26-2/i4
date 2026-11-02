@@ -8,6 +8,9 @@ from pipeline.feature_extraction.landmark_extractor import extract_landmarks
 from pipeline.model.predict import SignPredictor
 from pipeline.schema.sign_annotation import SignAnnotation
 
+from pipeline.feature_extraction.expression_features import RollingBaseline, base_features
+from pipeline.model.expression_classifier import ExpressionPredictor
+from pipeline.schema.facial_marker import FacialMarker
 
 from ods_bus.client import BusProducer
 from pipeline.bus_publisher import I4BusPublisher
@@ -53,6 +56,7 @@ def main():
     ap.add_argument("--gap", type=float, default=1.0, help="s sem frame novo = fim do sinal")
     ap.add_argument("--min-ms", type=int, default=500, help="ignora trechos menores que isso")
     ap.add_argument("--max-s", type=float, default=6.0, help="corta trechos mais longos que isso")
+    ap.add_argument("--expr-model", default=None)
     ap.add_argument("--device", default="cpu")
     args = ap.parse_args()
 
@@ -62,7 +66,17 @@ def main():
     buf, last = [], time.time()
     print("Aguardando frames...", flush=True)
     
-    bus = I4BusPublisher(BusProducer(), source_id="cam0")  
+    
+    from ods_bus.client import BusProducer, ensure_topics, topic_for
+
+    ensure_topics([topic_for(s) for s in (
+        "ods.i4.keypoints", "ods.i4.sign", "ods.i4.facial_marker"
+    )])
+    
+    bus = I4BusPublisher(BusProducer(), source_id="cam0")
+    
+    expr = ExpressionPredictor(args.expr_model, device=args.device) if args.expr_model else None
+    rolling = RollingBaseline(seconds=10.0, fps=25.0)
     while True:
         # o servidor recria o arquivo quando o cliente reconecta
         try:
@@ -92,9 +106,19 @@ def main():
                 ts = np.linspace(buf[0][1], buf[-1][1], len(seq)).astype(int).tolist()
                 
                 # DESCOMENTE A LINHA PARA PUBLICAR NO BARRAMENTO
-                # bus.publish_sign(label=label, confidence=conf,
-                                #  keypoint_frames=sequence_to_keypoint_frames(seq),
-                                #  timestamps_ms=ts, image_size=(reader.w, reader.h))
+                bus.publish_sign(label=label, confidence=conf,
+                                 keypoint_frames=sequence_to_keypoint_frames(seq),
+                                 timestamps_ms=ts, image_size=(reader.w, reader.h))
+                
+                if expr:
+                    baseline = rolling.value
+                    if np.any(baseline):  # buffer já aquecido; senão só alimenta a baseline
+                        for seg in expr.predict_segments(seq, ts, baseline=baseline):
+                            bus.publish_facial_marker(
+                                FacialMarker(seg.marker, seg.confidence, seg.start_ms, seg.end_ms)
+                            )
+                    for b in base_features(seq):
+                        rolling.update(b)
                 
                 print(SignAnnotation(
                     sinal=label, confianca=conf,
