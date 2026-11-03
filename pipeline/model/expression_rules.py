@@ -61,7 +61,7 @@ class RuleConfig:
     fps: float = 25.0
     min_frames: int = 12         # sequência mais curta que isso não é avaliada
     # --- movimento de cabeça (amplitude = percentil 90 - percentil 10 na janela)
-    shake_amp: float = 0.06      # yaw: amplitude mínima do balanço (NEGACAO)
+    shake_amp: float = 0.12      # yaw: amplitude mínima do balanço (NEGACAO)
     nod_amp: float = 0.05        # pitch: amplitude mínima do aceno (AFIRMACAO)
     min_reversals: int = 2       # idas e vindas mínimas na janela
     reversal_frac: float = 0.4   # uma volta só conta se andar >= 40% da amplitude
