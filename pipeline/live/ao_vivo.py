@@ -10,6 +10,7 @@ from pipeline.schema.sign_annotation import SignAnnotation
 
 from pipeline.feature_extraction.expression_features import RollingBaseline, base_features
 from pipeline.model.expression_classifier import ExpressionPredictor
+from pipeline.model.expression_rules import RuleConfig, RuleExpressionPredictor
 from pipeline.schema.facial_marker import FacialMarker
 
 from ods_bus.client import BusProducer
@@ -56,7 +57,8 @@ def main():
     ap.add_argument("--gap", type=float, default=1.0, help="s sem frame novo = fim do sinal")
     ap.add_argument("--min-ms", type=int, default=500, help="ignora trechos menores que isso")
     ap.add_argument("--max-s", type=float, default=6.0, help="corta trechos mais longos que isso")
-    ap.add_argument("--expr-model", default=None)
+    ap.add_argument("--expr-model", default=None, help="modelo treinado de expressões (.pt)")
+    ap.add_argument("--expr-rules", default=None, help="expressões por regras: 'padrao' ou caminho do json de limiares")
     ap.add_argument("--device", default="cpu")
     args = ap.parse_args()
 
@@ -75,7 +77,12 @@ def main():
     
     bus = I4BusPublisher(BusProducer(), source_id="cam0")
     
-    # expr = ExpressionPredictor(args.expr_model, device=args.device) if args.expr_model else None
+    if args.expr_model:
+        expr = ExpressionPredictor(args.expr_model, device=args.device)
+    elif args.expr_rules:
+        expr = RuleExpressionPredictor(RuleConfig() if args.expr_rules == "padrao" else RuleConfig.load(args.expr_rules))
+    else:
+        expr = None
     rolling = RollingBaseline(seconds=10.0, fps=25.0)
     while True:
         # o servidor recria o arquivo quando o cliente reconecta
@@ -110,16 +117,16 @@ def main():
                                  keypoint_frames=sequence_to_keypoint_frames(seq),
                                  timestamps_ms=ts, image_size=(reader.w, reader.h))
                 
-                # if expr:
-                #     baseline = rolling.value
-                #     if np.any(baseline):  # buffer já aquecido; senão só alimenta a baseline
-                #         for seg in expr.predict_segments(seq, ts, baseline=baseline):
-                #             bus.publish_facial_marker(
-                #                 FacialMarker(seg.marker, seg.confidence, seg.start_ms, seg.end_ms)
-                #             )
-                #     for b in base_features(seq):
-                #         rolling.update(b)
-                
+                if expr:
+                    baseline = rolling.value
+                    if np.any(baseline):  # buffer já aquecido; senão só alimenta a baseline
+                        for seg in expr.predict_segments(seq, ts, baseline=baseline):
+                            bus.publish_facial_marker(
+                                FacialMarker(seg.marker, seg.confidence, seg.start_ms, seg.end_ms)
+                            )
+                    for b in base_features(seq):
+                        rolling.update(b)
+
                 print(SignAnnotation(
                     sinal=label, confianca=conf,
                     inicio_ms=int(buf[0][1]), fim_ms=int(buf[-1][1]),
