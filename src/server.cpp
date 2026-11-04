@@ -402,14 +402,14 @@ static void detectar_e_salvar_direto(DecoderState& st, const cv::Mat& bgr) {
     // O frame SEM anotação vai pra shm (o MediaPipe não pode ver os retângulos).
     st.shm->escrever(bgr, ms);
 
-    // O frame anotado vai pro disco, só para conferência.
-    std::string caminho = std::string(PASTA_CAPTURAS) + "/pessoa_" +
-                          std::to_string(ms) + "_f" + std::to_string(st.frames_recebidos) + ".jpg";
-    if (cv::imwrite(caminho, anotado)) {
-        CROW_LOG_INFO << "Pessoa com rosto detectada, foto salva: " << caminho;
-    } else {
-        CROW_LOG_ERROR << "Falha ao salvar " << caminho;
-    }
+    // // O frame anotado vai pro disco, só para conferência.
+    // std::string caminho = std::string(PASTA_CAPTURAS) + "/pessoa_" +
+    //                       std::to_string(ms) + "_f" + std::to_string(st.frames_recebidos) + ".jpg";
+    // if (cv::imwrite(caminho, anotado)) {
+    //     CROW_LOG_INFO << "Pessoa com rosto detectada, foto salva: " << caminho;
+    // } else {
+    //     CROW_LOG_ERROR << "Falha ao salvar " << caminho;
+    // }
 }
 
 // Função simplificada para processar o frame JPEG recebido
@@ -495,3 +495,275 @@ int main() {
     app.port(18080).run();
     return 0;
 }
+
+
+// // src/server.cpp
+// // Webcam (V4L2, MJPG) -> detecção pessoa+rosto -> shm /frames_cam
+// // Uso: ./server [camera=0] [largura=640] [altura=480] [fps=25]
+
+// #include <opencv2/opencv.hpp>
+
+// #include <atomic>
+// #include <chrono>
+// #include <csignal>
+// #include <cstring>
+// #include <filesystem>
+// #include <iostream>
+// #include <memory>
+// #include <string>
+// #include <vector>
+
+// #include <fcntl.h>
+// #include <sys/mman.h>
+// #include <unistd.h>
+
+// static const char* PASTA_CAPTURAS = "capturas";
+// static constexpr bool SALVAR_CAPTURAS = true;   // false = não grava JPEG anotado em disco
+
+// static const char* SSD_PROTOTXT = "MobileNetSSD_deploy.prototxt";
+// static const char* SSD_MODELO   = "MobileNetSSD_deploy.caffemodel";
+// static const char* HAAR_ROSTO   = "/usr/share/opencv4/haarcascades/haarcascade_frontalface_default.xml";
+// static constexpr int   SSD_ENTRADA       = 300;
+// static constexpr int   SSD_CLASSE_PESSOA = 15;
+// static constexpr float PESSOA_CONF_MIN   = 0.5f;
+
+// static std::atomic<bool> g_parar{false};
+// static void on_signal(int) { g_parar = true; }
+
+// // ---------------------------------------------------------------------
+// // Memória compartilhada (layout igual ao shm_reader.py)
+// // ---------------------------------------------------------------------
+
+// struct alignas(64) ShmHeader {
+//     uint32_t magic, width, height, channels;
+//     std::atomic<uint64_t> seq;
+//     std::atomic<uint64_t> frame_id;
+//     uint64_t ts_ms;
+// };
+// static_assert(sizeof(ShmHeader) == 64);
+
+// class FrameShm {
+// private:
+//     std::string nome_;
+//     int w_, h_, fd_ = -1;
+//     size_t size_ = 0;
+//     uint8_t* base_ = nullptr;
+//     ShmHeader* hdr_ = nullptr;
+
+// public:
+//     FrameShm(const char* nome, int w, int h) : nome_(nome), w_(w), h_(h) {
+//         size_ = sizeof(ShmHeader) + size_t(w) * h * 3;
+//         fd_ = shm_open(nome, O_CREAT | O_RDWR, 0666);
+//         if (fd_ < 0) return;
+//         if (ftruncate(fd_, size_) < 0) return;
+//         void* p = mmap(nullptr, size_, PROT_READ | PROT_WRITE, MAP_SHARED, fd_, 0);
+//         if (p == MAP_FAILED) return;
+//         base_ = static_cast<uint8_t*>(p);
+//         hdr_ = reinterpret_cast<ShmHeader*>(base_);
+//         hdr_->magic = 0x46524D31;  // "FRM1"
+//         hdr_->width = w; hdr_->height = h; hdr_->channels = 3;
+//         hdr_->seq.store(0); hdr_->frame_id.store(0);
+//     }
+//     ~FrameShm() {
+//         if (base_) munmap(base_, size_);
+//         if (fd_ >= 0) { close(fd_); shm_unlink(nome_.c_str()); }
+//     }
+
+//     bool ok() const { return base_ != nullptr; }
+//     int w() const { return w_; }
+//     int h() const { return h_; }
+
+//     void escrever(const cv::Mat& bgr, uint64_t ts_ms) {
+//         // bgr precisa ser CV_8UC3 contínuo e do tamanho w_ x h_
+//         uint64_t s = hdr_->seq.load(std::memory_order_relaxed);
+//         hdr_->seq.store(s + 1, std::memory_order_relaxed);   // ímpar = escrevendo
+//         std::atomic_thread_fence(std::memory_order_release);
+
+//         std::memcpy(base_ + sizeof(ShmHeader), bgr.data, size_t(w_) * h_ * 3);
+//         hdr_->ts_ms = ts_ms;
+//         hdr_->frame_id.fetch_add(1, std::memory_order_relaxed);
+
+//         hdr_->seq.store(s + 2, std::memory_order_release);   // par = pronto
+//     }
+// };
+
+// // ---------------------------------------------------------------------
+// // Estado: modelos + shm
+// // ---------------------------------------------------------------------
+
+// struct Estado {
+//     cv::dnn::Net ssd;
+//     cv::CascadeClassifier rosto;
+//     std::unique_ptr<FrameShm> shm;
+//     uint64_t frames_recebidos = 0;
+// };
+
+// static bool carregar_modelos(Estado& st) {
+//     st.ssd = cv::dnn::readNetFromCaffe(SSD_PROTOTXT, SSD_MODELO);
+//     if (st.ssd.empty()) {
+//         std::cerr << "Falha ao carregar MobileNet-SSD\n";
+//         return false;
+//     }
+//     if (!st.rosto.load(HAAR_ROSTO)) {
+//         std::cerr << "Falha ao carregar cascade de rosto: " << HAAR_ROSTO << "\n";
+//         return false;
+//     }
+//     return true;
+// }
+
+// // ---------------------------------------------------------------------
+// // Detecção: pessoa (SSD) -> rosto (Haar) dentro da caixa da pessoa
+// // ---------------------------------------------------------------------
+
+// static void detectar_e_salvar(Estado& st, const cv::Mat& bgr, uint64_t ts_ms) {
+//     const int w = bgr.cols, h = bgr.rows;
+//     const cv::Rect limites(0, 0, w, h);
+//     cv::Mat anotado = bgr.clone();
+//     bool achou = false;
+
+//     cv::Mat blob = cv::dnn::blobFromImage(
+//         bgr, 0.007843, cv::Size(SSD_ENTRADA, SSD_ENTRADA),
+//         cv::Scalar(127.5, 127.5, 127.5), false, false);
+//     st.ssd.setInput(blob);
+//     cv::Mat saida = st.ssd.forward();             // [1, 1, N, 7]
+//     cv::Mat det(saida.size[2], saida.size[3], CV_32F, saida.ptr<float>());
+
+//     for (int i = 0; i < det.rows; ++i) {
+//         const float* d = det.ptr<float>(i);       // _, classe, conf, x1, y1, x2, y2
+//         if (static_cast<int>(d[1]) != SSD_CLASSE_PESSOA || d[2] < PESSOA_CONF_MIN) continue;
+
+//         cv::Rect pessoa(static_cast<int>(d[3] * w), static_cast<int>(d[4] * h),
+//                         static_cast<int>((d[5] - d[3]) * w), static_cast<int>((d[6] - d[4]) * h));
+//         pessoa &= limites;
+//         if (pessoa.area() <= 0) continue;
+
+//         cv::Rect topo(pessoa.x, pessoa.y, pessoa.width, static_cast<int>(pessoa.height * 0.6));
+//         cv::Mat cinza;
+//         cv::cvtColor(bgr(topo), cinza, cv::COLOR_BGR2GRAY);
+//         cv::equalizeHist(cinza, cinza);
+
+//         std::vector<cv::Rect> rostos;
+//         st.rosto.detectMultiScale(cinza, rostos, 1.1, 5, 0, cv::Size(30, 30));
+//         if (rostos.empty()) continue;
+
+//         achou = true;
+//         cv::rectangle(anotado, pessoa, cv::Scalar(0, 255, 0), 2);
+//         for (const cv::Rect& r : rostos)
+//             cv::rectangle(anotado, r + topo.tl(), cv::Scalar(255, 0, 0), 2);
+//     }
+
+//     // Sem pessoa com rosto: não escreve na shm. É essa ausência de frame
+//     // novo que o ao_vivo.py usa para fechar um sinal.
+//     if (!achou) return;
+
+//     if (!st.shm || st.shm->w() != w || st.shm->h() != h) {
+//         st.shm.reset();
+//         st.shm = std::make_unique<FrameShm>("/frames_cam", w, h);
+//         if (!st.shm->ok()) {
+//             std::cerr << "Falha ao criar shm\n";
+//             st.shm.reset();
+//             return;
+//         }
+//     }
+
+//     // Frame SEM anotação vai pra shm (o MediaPipe não pode ver os retângulos).
+//     st.shm->escrever(bgr, ts_ms);
+
+//     if (SALVAR_CAPTURAS) {
+//         std::string caminho = std::string(PASTA_CAPTURAS) + "/pessoa_" +
+//                               std::to_string(ts_ms) + "_f" + std::to_string(st.frames_recebidos) + ".jpg";
+//         if (!cv::imwrite(caminho, anotado))
+//             std::cerr << "Falha ao salvar " << caminho << "\n";
+//     }
+// }
+
+// // ---------------------------------------------------------------------
+// // Câmera
+// // ---------------------------------------------------------------------
+
+// static bool abrir_camera(cv::VideoCapture& cap, int indice, int w, int h, double fps) {
+//     if (!cap.open(indice, cv::CAP_V4L2)) return false;
+
+//     cap.set(cv::CAP_PROP_FOURCC, cv::VideoWriter::fourcc('M', 'J', 'P', 'G'));
+//     cap.set(cv::CAP_PROP_FRAME_WIDTH, w);
+//     cap.set(cv::CAP_PROP_FRAME_HEIGHT, h);
+//     cap.set(cv::CAP_PROP_FPS, fps);
+//     cap.set(cv::CAP_PROP_BUFFERSIZE, 1);      // não acumular frames velhos na fila do driver
+//     cap.set(cv::CAP_PROP_CONVERT_RGB, 0);     // entrega o JPEG cru; decodificamos nós
+
+//     int fcc = static_cast<int>(cap.get(cv::CAP_PROP_FOURCC));
+//     std::string fourcc{char(fcc & 255), char((fcc >> 8) & 255), char((fcc >> 16) & 255), char((fcc >> 24) & 255)};
+//     std::cout << "câmera " << indice << ": " << cap.get(cv::CAP_PROP_FRAME_WIDTH) << "x"
+//               << cap.get(cv::CAP_PROP_FRAME_HEIGHT) << " formato=" << fourcc << "\n";
+//     if (fourcc != "MJPG")
+//         std::cerr << "AVISO: a câmera não aceitou MJPG (formato=" << fourcc << ")\n";
+//     return true;
+// }
+
+// // raw = JPEG cru (1xN CV_8UC1) ou, se o backend já converteu, um Mat BGR.
+// static cv::Mat decodificar(const cv::Mat& raw) {
+//     if (raw.empty()) return {};
+//     if (raw.type() == CV_8UC3) return raw;
+//     return cv::imdecode(raw, cv::IMREAD_COLOR);
+// }
+
+// // ---------------------------------------------------------------------
+// // main
+// // ---------------------------------------------------------------------
+
+// int main(int argc, char** argv) {
+//     const int    indice = argc > 1 ? std::atoi(argv[1]) : 0;
+//     const int    largura = argc > 2 ? std::atoi(argv[2]) : 640;
+//     const int    altura  = argc > 3 ? std::atoi(argv[3]) : 480;
+//     const double fps     = argc > 4 ? std::atof(argv[4]) : 25.0;   // o treino usou 25
+
+//     std::signal(SIGINT, on_signal);
+//     std::signal(SIGTERM, on_signal);
+//     std::filesystem::create_directories(PASTA_CAPTURAS);
+
+//     Estado st;
+//     if (!carregar_modelos(st)) return 1;
+
+//     cv::VideoCapture cap;
+//     if (!abrir_camera(cap, indice, largura, altura, fps)) {
+//         std::cerr << "Não consegui abrir a câmera " << indice << "\n";
+//         return 1;
+//     }
+
+//     using clock = std::chrono::steady_clock;
+//     const auto intervalo = std::chrono::duration<double>(1.0 / fps);
+//     auto proximo = clock::now();
+//     int falhas = 0;
+//     cv::Mat raw;
+
+//     std::cout << "capturando (Ctrl+C para encerrar)\n";
+//     while (!g_parar) {
+//         if (!cap.read(raw) || raw.empty()) {
+//             if (++falhas >= 30) { std::cerr << "câmera parou de entregar frames\n"; break; }
+//             continue;
+//         }
+//         falhas = 0;
+
+//         // Instante de captura, tomado logo após a leitura (não depois da detecção).
+//         const uint64_t ts_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+//             std::chrono::system_clock::now().time_since_epoch()).count();
+
+//         // Limita a taxa; o frame descartado já foi lido, então a fila não enche.
+//         const auto agora = clock::now();
+//         if (agora < proximo) continue;
+//         proximo = agora + std::chrono::duration_cast<clock::duration>(intervalo);
+
+//         cv::Mat bgr = decodificar(raw);
+//         if (bgr.empty()) {
+//             std::cerr << "Falha ao decodificar JPEG da câmera\n";
+//             continue;
+//         }
+
+//         st.frames_recebidos++;
+//         detectar_e_salvar(st, bgr, ts_ms);
+//     }
+
+//     cap.release();
+//     std::cout << "encerrado, frames lidos: " << st.frames_recebidos << "\n";
+//     return 0;   // ~Estado libera a shm e faz shm_unlink
+// }

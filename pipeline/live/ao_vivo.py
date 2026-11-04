@@ -59,6 +59,7 @@ def main():
     ap.add_argument("--max-s", type=float, default=6.0, help="corta trechos mais longos que isso")
     ap.add_argument("--expr-model", default=None, help="modelo treinado de expressões (.pt)")
     ap.add_argument("--expr-rules", default=None, help="expressões por regras: 'padrao' ou caminho do json de limiares")
+    ap.add_argument("--publish", action="store_true", help="publica no barramento (sem isso, só imprime)")
     ap.add_argument("--device", default="cpu")
     args = ap.parse_args()
 
@@ -75,7 +76,14 @@ def main():
         "ods.i4.keypoints", "ods.i4.sign", "ods.i4.facial_marker"
     )])
     
-    bus = I4BusPublisher(BusProducer(), source_id="cam0")
+    
+    bus = None
+    if args.publish:
+        from ods_bus.client import ensure_topics, topic_for
+        ensure_topics([topic_for(s) for s in ("ods.i4.keypoints", "ods.i4.sign", "ods.i4.facial_marker")])
+        bus = I4BusPublisher(BusProducer(), source_id="cam0")
+    
+    # bus = I4BusPublisher(BusProducer(), source_id="cam0")
     
     if args.expr_model:
         expr = ExpressionPredictor(args.expr_model, device=args.device)
@@ -111,26 +119,34 @@ def main():
                 label, conf = predictor.predict(seq)
 
                 ts = np.linspace(buf[0][1], buf[-1][1], len(seq)).astype(int).tolist()
-                
-                # DESCOMENTE A LINHA PARA PUBLICAR NO BARRAMENTO
-                bus.publish_sign(label=label, confidence=conf,
-                                 keypoint_frames=sequence_to_keypoint_frames(seq),
-                                 timestamps_ms=ts, image_size=(reader.w, reader.h))
-                
-                if expr:
-                    baseline = rolling.value
-                    if np.any(baseline):  # buffer já aquecido; senão só alimenta a baseline
-                        for seg in expr.predict_segments(seq, ts, baseline=baseline):
-                            bus.publish_facial_marker(
-                                FacialMarker(seg.marker, seg.confidence, seg.start_ms, seg.end_ms)
-                            )
-                    for b in base_features(seq):
-                        rolling.update(b)
 
                 print(SignAnnotation(
                     sinal=label, confianca=conf,
                     inicio_ms=int(buf[0][1]), fim_ms=int(buf[-1][1]),
                 ).to_json(indent=2), flush=True)
+
+                if args.publish:
+                    bus.publish_sign(label=label, confidence=conf,
+                                     keypoint_frames=sequence_to_keypoint_frames(seq),
+                                     timestamps_ms=ts, image_size=(reader.w, reader.h))
+
+                if expr:
+                    baseline = rolling.value
+                    if np.any(baseline):
+                        segs = expr.predict_segments(seq, ts, baseline=baseline)
+                        if not segs:
+                            print("  expressão: nenhuma", flush=True)
+                        for seg in segs:
+                            print(f"  expressão: {seg.marker} (conf {seg.confidence:.2f}) "
+                                  f"{(seg.start_ms - ts[0]) / 1000:.1f}s -> {(seg.end_ms - ts[0]) / 1000:.1f}s",
+                                  flush=True)
+                            if args.publish:
+                                bus.publish_facial_marker(
+                                    FacialMarker(seg.marker, seg.confidence, seg.start_ms, seg.end_ms))
+                    else:
+                        print("  expressão: aquecendo linha de base (faça um trecho com rosto neutro)", flush=True)
+                    for b in base_features(seq):
+                        rolling.update(b)
             else:
                 print(f"trecho curto demais ({len(buf)} frames), ignorado")
             buf = []
