@@ -1,5 +1,6 @@
 """ao_vivo.py: lê frames da shm, segmenta por pausa e roda o pipeline."""
 import argparse, os, time
+from pathlib import Path
 import cv2
 import numpy as np
 
@@ -86,7 +87,9 @@ def main():
     if args.publish:
         from ods_bus.client import ensure_topics, topic_for
         ensure_topics([topic_for(s) for s in ("ods.i4.keypoints", "ods.i4.sign", "ods.i4.facial_marker")])
-        bus = I4BusPublisher(BusProducer(), source_id="cam0")
+        # artifact_version reflete o arquivo de checkpoint carregado (--model),
+        # em vez do default hardcoded do publisher (modelo antigo de 20 classes)
+        bus = I4BusPublisher(BusProducer(), source_id="cam0", artifact_version=Path(args.model).stem)
     
     # bus = I4BusPublisher(BusProducer(), source_id="cam0")
     
