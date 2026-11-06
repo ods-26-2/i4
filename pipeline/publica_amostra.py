@@ -56,7 +56,9 @@ def main():
         timestamps_ms=timestamps,
         image_size=(width, height),
         signer_id=signer_id,
+        publish_keypoints=False,
     )
+    
     print(f"publicado: {video_id} ({label}), {len(frames)} quadros, sessão {bus.session_id}")
 
 

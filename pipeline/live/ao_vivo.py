@@ -69,12 +69,14 @@ def main():
     buf, last = [], time.time()
     print("Aguardando frames...", flush=True)
     
-    
-    from ods_bus.client import BusProducer, ensure_topics, topic_for
 
-    ensure_topics([topic_for(s) for s in (
-        "ods.i4.keypoints", "ods.i4.sign", "ods.i4.facial_marker"
-    )])
+    if args.publish:
+        from ods_bus.client import BusProducer, ensure_topics, topic_for
+
+    if args.publish:
+        ensure_topics([topic_for(s) for s in (
+            "ods.i4.keypoints", "ods.i4.sign", "ods.i4.facial_marker"
+        )])
     
     
     bus = None
@@ -128,7 +130,8 @@ def main():
                 if args.publish:
                     bus.publish_sign(label=label, confidence=conf,
                                      keypoint_frames=sequence_to_keypoint_frames(seq),
-                                     timestamps_ms=ts, image_size=(reader.w, reader.h))
+                                     timestamps_ms=ts, image_size=(reader.w, reader.h),
+                                     publish_keypoints=False)
 
                 if expr:
                     baseline = rolling.value

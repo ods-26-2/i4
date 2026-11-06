@@ -25,7 +25,7 @@ from ods_bus.envelope import build_message, validate_message
 
 log = logging.getLogger("ods_bus")
 
-DEFAULT_BOOTSTRAP = "34.66.235.91:9093"  # TEMPORÁRIO (nuvem, só testes)
+DEFAULT_BOOTSTRAP = "172.18.4.56:9092"  # TEMPORÁRIO (nuvem, só testes)
 
 # Tópico = schema (ods.i4.sign). O guia do Kafka sugere nomes por domínio
 # (ods.gesto.reconhecido); se o TRA-1 decidir por eles, é só mapear aqui:

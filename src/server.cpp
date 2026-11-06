@@ -402,14 +402,14 @@ static void detectar_e_salvar_direto(DecoderState& st, const cv::Mat& bgr) {
     // O frame SEM anotação vai pra shm (o MediaPipe não pode ver os retângulos).
     st.shm->escrever(bgr, ms);
 
-    // // O frame anotado vai pro disco, só para conferência.
-    // std::string caminho = std::string(PASTA_CAPTURAS) + "/pessoa_" +
-    //                       std::to_string(ms) + "_f" + std::to_string(st.frames_recebidos) + ".jpg";
-    // if (cv::imwrite(caminho, anotado)) {
-    //     CROW_LOG_INFO << "Pessoa com rosto detectada, foto salva: " << caminho;
-    // } else {
-    //     CROW_LOG_ERROR << "Falha ao salvar " << caminho;
-    // }
+    // O frame anotado vai pro disco, só para conferência.
+    std::string caminho = std::string(PASTA_CAPTURAS) + "/pessoa_" +
+                          std::to_string(ms) + "_f" + std::to_string(st.frames_recebidos) + ".jpg";
+    if (cv::imwrite(caminho, anotado)) {
+        CROW_LOG_INFO << "Pessoa com rosto detectada, foto salva: " << caminho;
+    } else {
+        CROW_LOG_ERROR << "Falha ao salvar " << caminho;
+    }
 }
 
 // Função simplificada para processar o frame JPEG recebido

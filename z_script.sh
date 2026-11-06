@@ -9,9 +9,9 @@
 ############################################################################
 # 0. ANTES DE TUDO (uma vez por terminal [WSL])
 ############################################################################
-# Endereço do broker NÃO é fixo no código. Padrão = 34.66.235.91:9093 (nuvem, teste).
+# Endereço do broker NÃO é fixo no código. Padrão = 172.18.4.56:9092 (nuvem, teste).
 # Quando o Kafka for local, é só trocar aqui:
-export ODS_KAFKA_BOOTSTRAP=34.66.235.91:9093
+export ODS_KAFKA_BOOTSTRAP=172.18.4.56:9092
 
 # Conferir que o broker responde e quais tópicos existem:
 python3 -c "from confluent_kafka.admin import AdminClient; from ods_bus.client import bootstrap_servers; print(sorted(AdminClient({'bootstrap.servers': bootstrap_servers()}).list_topics(timeout=10).topics))"
@@ -72,14 +72,18 @@ python3 -m ods_bus.debug tail ods.i4.keypoints ods.i4.sign ods.i4.facial_marker 
 
 # histórico do tópico (desde o início)
 python3 -m ods_bus.debug tail ods.i4.sign --from-start --max 20 --timeout 30
-python3 -m ods_bus.debug tail ods.s6.synthesis.reply --from-start --max 20 --timeout 60
+python3 -m ods_bus.debug tail ods.i4.sign ods.i4.keypoints --from-start --max 20 --timeout 30
+
+# reply -> resposta para o A6; command -> pedido do A6
+python3 -m ods_bus.debug tail ods.s6.synthesis.reply --from-start --max 20 --timeout 60 
 python3 -m ods_bus.debug tail ods.s6.synthesis.command --from-start --max 20 --timeout 60
 
 # ---------- 2.2 PUBLICAR MOCK DO I4 (sinal + keypoints, sem câmera) ----------
 # Deixe o tail (2.1) rodando em outro terminal antes.
 # Usa um .parquet de features_v2 e o mesmo I4BusPublisher do ao_vivo.
-python3 -m pipeline.publica_amostra --features-dir dataset/features_v2
-python3 -m pipeline.publica_amostra --parquet dataset/features_v2/XXXX.parquet --confidence 0.9 --source-id cam0 --size 1280x720
+# python3 -m pipeline.publica_amostra --features-dir dataset/features_v2
+# python3 -m pipeline.publica_amostra --parquet dataset/features_v2/XXXX.parquet --confidence 0.9 --source-id cam0 --size 1280x720
+python3 -m pipeline.publica_amostra --parquet lexicon/lexicon-Aluno.parquet --confidence 0.90
 
 # ---------- 2.3 PUBLICAR MOCK DE facial_marker ----------
 python3 - <<'EOF'
