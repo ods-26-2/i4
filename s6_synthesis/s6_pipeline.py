@@ -46,7 +46,7 @@ class S6SynthesisPipeline:
         self,
         lexicon_dir: str | Path,
         landmarks: Optional[LandmarkExtractionConfig] = None,
-        transition_frames: int = 8,
+        transition_frames: int = 16,
         fps: float = 25.0,
     ):
         self.lexicon = load_lexicon(lexicon_dir)
@@ -64,7 +64,7 @@ def main():
     parser = argparse.ArgumentParser(description="Síntese de trajetória Libras (S6) a partir de um comando de A6.")
     parser.add_argument("--lexicon-dir", default="lexicon")
     parser.add_argument("--comando", nargs="+", required=True, help="Sinais na ordem desejada, ex.: --comando Aluno Banco")
-    parser.add_argument("--transition-frames", type=int, default=8)
+    parser.add_argument("--transition-frames", type=int, default=16)
     parser.add_argument("--fps", type=float, default=25.0)
     args = parser.parse_args()
 
