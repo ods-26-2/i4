@@ -22,3 +22,7 @@ i4-main-updated.zip
 i4-extracted/
 
 src/capturas
+
+# videos brutos gravados pra treinar o classificador de expressoes -
+# raw footage, nao e artefato do projeto (mesmo motivo do dataset/)
+videos_classificador/

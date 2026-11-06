@@ -36,7 +36,7 @@ from s6_synthesis.synthesis.transition import generate_transition
 @dataclass
 class SynthesizerConfig:
     landmarks: LandmarkExtractionConfig
-    transition_frames: int = 8
+    transition_frames: int = 16  # 640ms a 25fps — 8 (320ms) ficava curto demais pra parecer natural
     fps: float = 25.0  # mesmo fps usado por build_dataset_features (etapa [2] de I4)
 
 

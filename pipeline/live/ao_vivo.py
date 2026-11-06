@@ -55,7 +55,12 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--model", required=True)
     ap.add_argument("--gap", type=float, default=1.0, help="s sem frame novo = fim do sinal")
-    ap.add_argument("--min-ms", type=int, default=500, help="ignora trechos menores que isso")
+    # 500ms descartava sinais curtos de verdade (ex.: "Não" balançando a
+    # cabeça rápido) — o servidor já grava a ~10fps (1 a cada 3 de uma
+    # câmera a 30fps), então o filtro de 4 frames abaixo já barra ruído
+    # (toque acidental, mão passando no quadro); não precisa de um piso
+    # de duração tão alto em cima disso.
+    ap.add_argument("--min-ms", type=int, default=150, help="ignora trechos menores que isso")
     ap.add_argument("--max-s", type=float, default=6.0, help="corta trechos mais longos que isso")
     ap.add_argument("--expr-model", default=None, help="modelo treinado de expressões (.pt)")
     ap.add_argument("--expr-rules", default=None, help="expressões por regras: 'padrao' ou caminho do json de limiares")
