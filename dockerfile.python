@@ -1,0 +1,18 @@
+FROM python:3.11-slim
+ARG REQS
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        libegl1 \
+        libgles2 \
+        libgl1 \
+        libglib2.0-0 \
+    && rm -rf /var/lib/apt/lists/*
+WORKDIR /app
+COPY ${REQS} requirements.txt
+RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu \
+ && pip install --no-cache-dir -r requirements.txt
+COPY pipeline/ pipeline/
+COPY s6_synthesis/ s6_synthesis/
+COPY ods_bus/ ods_bus/
+COPY lexicon/ lexicon/
+# baixa o modelo do MediaPipe na build, não na primeira execução
+RUN python -c "from pipeline.feature_extraction.landmark_extractor import ensure_model_downloaded as e; e()"

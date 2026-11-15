@@ -1,0 +1,21 @@
+FROM ubuntu:24.04 AS build
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential cmake git ca-certificates libasio-dev \
+    libopencv-dev libavcodec-dev libavutil-dev libswscale-dev
+RUN git clone --depth 1 https://github.com/CrowCpp/Crow.git /tmp/crow \
+ && cmake -S /tmp/crow -B /tmp/crow/build -DCROW_BUILD_EXAMPLES=OFF -DCROW_BUILD_TESTS=OFF \
+ && cmake --install /tmp/crow/build
+WORKDIR /src
+COPY src/ src/
+COPY CMakeLists.txt .
+RUN cmake -S . -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build -j2
+
+FROM ubuntu:24.04
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libopencv-dev opencv-data libavcodec60 libswscale7 libavutil58 \
+ && rm -rf /var/lib/apt/lists/*
+WORKDIR /app
+COPY --from=build /src/build/server .
+COPY src/MobileNetSSD_deploy.prototxt src/MobileNetSSD_deploy.caffemodel ./
+EXPOSE 18080
+CMD ["./server"]

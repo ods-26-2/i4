@@ -1,0 +1,6 @@
+dataset/
+capturas/
+confusion_cache*/
+relatorio*/
+.git/
+__pycache__/

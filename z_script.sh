@@ -9,9 +9,9 @@
 ############################################################################
 # 0. ANTES DE TUDO (uma vez por terminal [WSL])
 ############################################################################
-# Endereço do broker NÃO é fixo no código. Padrão = 172.18.4.56:9092 (nuvem, teste).
+# Endereço do broker NÃO é fixo no código. Padrão = 34.66.235.91:9093 (nuvem, teste).
 # Quando o Kafka for local, é só trocar aqui:
-export ODS_KAFKA_BOOTSTRAP=172.18.4.56:9092
+export ODS_KAFKA_BOOTSTRAP=34.66.235.91:9093
 
 # Conferir que o broker responde e quais tópicos existem:
 python3 -c "from confluent_kafka.admin import AdminClient; from ods_bus.client import bootstrap_servers; print(sorted(AdminClient({'bootstrap.servers': bootstrap_servers()}).list_topics(timeout=10).topics))"
@@ -42,7 +42,8 @@ py .\webcam.py --url ws://localhost:18080/ws/video --preview
 # a) só sinais
 python3 -m pipeline.live.ao_vivo --model model_v3_e100s2.pt
 # b) sinais + expressões por modelo treinado
-python3 -m pipeline.live.ao_vivo --model model_v3_e100s2.pt --expr-model expression_model.pt
+# python3 -m pipeline.live.ao_vivo --model model_v4_e60s1_aug.pt --expr-model expression_model_v1.pt
+python3 -m pipeline.live.ao_vivo --model model_v4.pt --expr-model expression_model_v1.pt
 # c) sinais + expressões por regras (sem treino)
 python3 -m pipeline.live.ao_vivo --model model_v3_e100s2.pt --expr-rules padrao
 #    ou com limiares calibrados: --expr-rules limiares.json
