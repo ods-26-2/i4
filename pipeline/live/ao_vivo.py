@@ -18,6 +18,14 @@ from ods_bus.client import BusProducer
 from pipeline.bus_publisher import I4BusPublisher
 from pipeline.feature_extraction.landmark_extractor import sequence_to_keypoint_frames
 
+import mediapipe as mp
+from mediapipe.tasks.python import vision
+from mediapipe.tasks.python.core.base_options import BaseOptions
+from pipeline.feature_extraction.landmark_extractor import (
+    LandmarkExtractionConfig, ensure_model_downloaded, DEFAULT_MODEL_PATH,
+    result_to_feature_vector, append_hand_velocity, sequence_to_keypoint_frames,
+)
+from pipeline.live.segmenter import SignSegmenter
 
 SHM = "/dev/shm/frames_cam"
 TARGET_FPS = 25.0        # o mesmo do PreprocessConfig (o treino usou isso)
@@ -102,60 +110,88 @@ def main():
     else:
         expr = None
     rolling = RollingBaseline(seconds=10.0, fps=25.0)
+    
+    
+    cfg = LandmarkExtractionConfig()
+    options = vision.HolisticLandmarkerOptions(
+        base_options=BaseOptions(model_asset_path=str(ensure_model_downloaded(DEFAULT_MODEL_PATH))),
+        running_mode=vision.RunningMode.IMAGE,
+        min_pose_detection_confidence=0.5, min_face_detection_confidence=0.5,
+        min_pose_landmarks_confidence=0.5, min_hand_landmarks_confidence=0.5,
+    )
+    landmarker = vision.HolisticLandmarker.create_from_options(options)
+    seg = SignSegmenter(min_ms=args.min_ms, max_ms=int(args.max_s * 1000))
+    rolling = RollingBaseline(seconds=10.0, fps=25.0)
+        
     while True:
-        # o servidor recria o arquivo quando o cliente reconecta
+    # o servidor recria o arquivo quando o cliente reconecta
         try:
             if os.stat(SHM).st_ino != inode:
                 reader.close()
                 reader = abrir()
                 inode = os.fstat(reader.f.fileno()).st_ino
+                seg.reset()
         except FileNotFoundError:
             pass
 
         res = reader.ler()
-        if res is not None:
-            buf.append(res)
-            last = time.time()
-            if (buf[-1][1] - buf[0][1]) / 1000 < args.max_s:
-                continue
+        if res is None:
+            time.sleep(0.005)
+            continue
 
-        pausou = buf and (time.time() - last) > args.gap
-        estourou = buf and (buf[-1][1] - buf[0][1]) / 1000 >= args.max_s
-        if pausou or estourou:
-            dur_ms = buf[-1][1] - buf[0][1]
-            if dur_ms >= args.min_ms and len(buf) >= 4:
-                frames, dur_ms = preparar(buf)
-                seq = extract_landmarks(frames)
-                label, conf = predictor.predict(seq)
+        bgr, ts = res
+        rgb = cv2.resize(cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB), SIZE, interpolation=cv2.INTER_AREA)
+        result = landmarker.detect(mp.Image(image_format=mp.ImageFormat.SRGB, data=np.ascontiguousarray(rgb)))
+        row = result_to_feature_vector(result, cfg)
 
-                ts = np.linspace(buf[0][1], buf[-1][1], len(seq)).astype(int).tolist()
+        # a baseline de expressão precisa de frames em repouso: alimenta só quando não há sinal ativo
+        if not seg.active:
+            rolling.update(base_features(row[None, :])[0])
 
-                print(SignAnnotation(
-                    sinal=label, confianca=conf,
-                    inicio_ms=int(buf[0][1]), fim_ms=int(buf[-1][1]),
-                ).to_json(indent=2), flush=True)
+        estava_ativo = seg.active
+        out = seg.feed(row, ts)
 
-                if args.publish:
-                    bus.publish_sign(label=label, confidence=conf,
-                                     keypoint_frames=sequence_to_keypoint_frames(seq),
-                                     timestamps_ms=ts, image_size=(reader.w, reader.h),
-                                     publish_keypoints=False)
+        if not estava_ativo and seg.active:
+            print(">> Sinal detectado, gravando...", flush=True)
 
-                if expr:
-                    baseline = rolling.value
-                    if np.any(baseline):
-                        segs = expr.predict_segments(seq, ts, baseline=baseline)
-                        if not segs:
-                            print("  expressão: nenhuma", flush=True)
-                        for seg in segs:
-                            print(f"  expressão: {seg.marker} (conf {seg.confidence:.2f}) "
-                                  f"{(seg.start_ms - ts[0]) / 1000:.1f}s -> {(seg.end_ms - ts[0]) / 1000:.1f}s",
-                                  flush=True)
-                            if args.publish:
-                                bus.publish_facial_marker(
-                                    FacialMarker(seg.marker, seg.confidence, seg.start_ms, seg.end_ms))
+        if estava_ativo and not seg.active and out is None:
+            print(">> Trecho descartado (curto demais)", flush=True)
+
+        if out is None:
+            continue
+
+        rows, tss = out
+        t0 = time.time()
+        
+        print(f">> Processando ({tss[-1] - tss[0]} ms, {len(tss)} frames)...", flush=True)
+
+        alvo = np.linspace(tss[0], tss[-1], max(2, int((tss[-1] - tss[0]) / 1000 * TARGET_FPS)))
+        idx = np.abs(np.array(tss)[None, :] - alvo[:, None]).argmin(axis=1)
+        seq = append_hand_velocity(np.stack([rows[i] for i in idx]), cfg)
+        ts_list = np.linspace(tss[0], tss[-1], len(seq)).astype(int).tolist()
+
+        label, conf = predictor.predict(seq)
+        print(f">> Pronto em {time.time() - t0:.2f} s", flush=True)
+        print(SignAnnotation(sinal=label, confianca=conf,
+                             inicio_ms=int(tss[0]), fim_ms=int(tss[-1])).to_json(indent=2), flush=True)
+
+
+        if args.publish:
+            bus.publish_sign(label=label, confidence=conf,
+                             keypoint_frames=sequence_to_keypoint_frames(seq),
+                             timestamps_ms=ts_list, image_size=(reader.w, reader.h),
+                             publish_keypoints=False)
+
+        if expr:
+            baseline = rolling.value
+            if np.any(baseline):
+                segs = expr.predict_segments(seq, ts_list, baseline=baseline)
+                for s in segs:
+                    print(f"  expressão: {s.marker} (conf {s.confidence:.2f})", flush=True)
+                    if args.publish:
+                        bus.publish_facial_marker(FacialMarker(s.marker, s.confidence, s.start_ms, s.end_ms))
                     else:
-                        print("  expressão: aquecendo linha de base (faça um trecho com rosto neutro)", flush=True)
+                        print("  expressão: aquecendo linha de base", flush=True)
                     for b in base_features(seq):
                         rolling.update(b)
             else:

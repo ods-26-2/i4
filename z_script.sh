@@ -43,7 +43,7 @@ py .\webcam.py --url ws://localhost:18080/ws/video --preview
 python3 -m pipeline.live.ao_vivo --model model_v3_e100s2.pt
 # b) sinais + expressões por modelo treinado
 # python3 -m pipeline.live.ao_vivo --model model_v4_e60s1_aug.pt --expr-model expression_model_v1.pt
-python3 -m pipeline.live.ao_vivo --model model_v4.pt --expr-model expression_model_v1.pt
+python3 -m pipeline.live.ao_vivo --model models/model_v4_e60s1_aug.pt --expr-model expression_model_v1.pt
 # c) sinais + expressões por regras (sem treino)
 python3 -m pipeline.live.ao_vivo --model model_v3_e100s2.pt --expr-rules padrao
 #    ou com limiares calibrados: --expr-rules limiares.json

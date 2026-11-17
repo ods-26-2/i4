@@ -7,7 +7,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 find_package(OpenCV REQUIRED)
 find_package(Crow REQUIRED)
 find_package(PkgConfig REQUIRED)
-pkg_check_modules(FFMPEG REQUIRED IMPORTED_TARGET libavcodec libavutil libswscale)
+pkg_check_modules(FFMPEG REQUIRED IMPORTED_TARGET)
 
 add_executable(server src/server.cpp)
 target_include_directories(server PRIVATE ${OpenCV_INCLUDE_DIRS})
